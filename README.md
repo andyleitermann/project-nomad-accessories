@@ -1,4 +1,4 @@
-# project-nomad-accessories
+# Andy's Project Nomad Accessories
 
 Scripts and documentation to help you get more out of [Project N.O.M.A.D.](https://github.com/Crosstalk-Solutions/project-nomad) — an offline AI assistant and self-hosted knowledge base designed for resilience and off-grid use.
 
