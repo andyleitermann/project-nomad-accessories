@@ -34,7 +34,7 @@ kibuild
 
 ## Optional: Custom ZIM Icons
 
-By default, ZIM files you build yourself (e.g. YouTube channel archives) show a generic placeholder icon in the Kiwix library. The `icons/` directory contains an optional patch system that injects custom 48x48 PNG icons into the library index automatically on each kibuild run.
+By default, ZIM files you build yourself often show a generic placeholder question-mark icon in the Kiwix library. The `icons/` directory contains an optional patch system that injects custom 48x48 PNG icons into the library index automatically on each kibuild run.
 
 See [icons/README.md](icons/README.md) for setup instructions.
 
