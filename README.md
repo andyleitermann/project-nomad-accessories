@@ -6,7 +6,7 @@ Scripts and documentation to help you get more out of [Project N.O.M.A.D.](https
 
 **Scripts** — drop-in utilities that extend NOMAD's functionality:
 
-- [`kibuild/`](kibuild/) — rebuilds the Kiwix library index after adding ZIM files, with optional custom icon support
+- [`scripts/kibuild/`](scripts/kibuild/) — rebuilds the Kiwix library index after adding ZIM files, with optional custom icon support
 
 **How-Tos** — guides for common tasks and workflows:
 
