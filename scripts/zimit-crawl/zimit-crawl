@@ -1,0 +1,153 @@
+#!/bin/bash
+# zimit-crawl — Zimit wrapper for Project N.O.M.A.D.
+# Crawls a website and packages it as a ZIM file for Kiwix.
+# Automatically loads the new ZIM into Kiwix when done.
+#
+# Usage:
+#   zimit-crawl --url <url> --name <zim_name> --title <title> [options]
+#
+# Required:
+#   --url       URL to crawl (e.g. https://example.com)
+#   --name      ZIM name, lowercase with underscores (e.g. example_en)
+#   --title     Display title shown in Kiwix (max 30 characters)
+#
+# Optional:
+#   --desc      Short description (default: auto-generated)
+#   --depth     Crawl depth (default: 5)
+#   --limit     Max pages to crawl (default: 500)
+#   --workers   Parallel workers (default: 2)
+#   --exclude   Regex of paths to exclude
+#   --no-kibuild  Skip reloading Kiwix after crawl
+#   --help      Show this help
+
+set -e
+
+ZIM_DIR="${NOMAD_ZIM_DIR:-/opt/project-nomad/storage/zim}"
+KIWIX_CONTAINER="${NOMAD_KIWIX_CONTAINER:-nomad_kiwix_server}"
+KIWIX_TOOLS_IMAGE="ghcr.io/kiwix/kiwix-tools:latest"
+ZIMIT_IMAGE="ghcr.io/openzim/zimit:latest"
+ICON_PATCH="${NOMAD_ICON_PATCH:-/opt/project-nomad/kiwix-icon-patch.py}"
+
+# Defaults
+DEPTH=5
+LIMIT=500
+WORKERS=2
+DO_KIBUILD=true
+URL=""
+NAME=""
+TITLE=""
+DESC=""
+EXCLUDE=""
+
+usage() {
+  grep '^#' "$0" | grep -v '#!/' | sed 's/^# \?//'
+  exit 0
+}
+
+die() { echo "ERROR: $1" >&2; exit 1; }
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --url)        URL="$2";        shift 2 ;;
+    --name)       NAME="$2";       shift 2 ;;
+    --title)      TITLE="$2";      shift 2 ;;
+    --desc)       DESC="$2";       shift 2 ;;
+    --depth)      DEPTH="$2";      shift 2 ;;
+    --limit)      LIMIT="$2";      shift 2 ;;
+    --workers)    WORKERS="$2";    shift 2 ;;
+    --exclude)    EXCLUDE="$2";    shift 2 ;;
+    --no-kibuild) DO_KIBUILD=false; shift ;;
+    --help|-h)    usage ;;
+    *) die "Unknown option: $1" ;;
+  esac
+done
+
+# Validate required args
+[[ -z "$URL" ]]   && die "--url is required"
+[[ -z "$NAME" ]]  && die "--name is required"
+[[ -z "$TITLE" ]] && die "--title is required"
+
+# Check title length
+TITLE_LEN=${#TITLE}
+if [[ $TITLE_LEN -gt 30 ]]; then
+  die "Title is ${TITLE_LEN} characters — zimwriterfs requires max 30. Please shorten it."
+fi
+
+# Auto-generate description if not provided
+[[ -z "$DESC" ]] && DESC="Offline archive of ${URL}"
+
+OUTPUT_ZIM="${ZIM_DIR}/${NAME}_$(date +%Y-%m).zim"
+
+echo "=============================="
+echo "  zimit-crawl"
+echo "=============================="
+echo "  URL:      $URL"
+echo "  Name:     $NAME"
+echo "  Title:    $TITLE"
+echo "  Output:   $OUTPUT_ZIM"
+echo "  Depth:    $DEPTH  |  Limit: $LIMIT  |  Workers: $WORKERS"
+[[ -n "$EXCLUDE" ]] && echo "  Exclude:  $EXCLUDE"
+echo "=============================="
+echo ""
+
+# Check ZIM dir exists
+[[ -d "$ZIM_DIR" ]] || die "ZIM directory not found: $ZIM_DIR"
+
+# Build zimit args
+ZIMIT_ARGS=(
+  --seeds "$URL"
+  --name "$NAME"
+  --title "$TITLE"
+  --description "$DESC"
+  --lang en
+  --scopeType prefix
+  --depth "$DEPTH"
+  --pageLimit "$LIMIT"
+  --sizeSoftLimit 10000000000
+  --workers "$WORKERS"
+  --waitUntil networkidle2
+  --verbose
+)
+[[ -n "$EXCLUDE" ]] && ZIMIT_ARGS+=(--scopeExcludeRx "$EXCLUDE")
+
+# Run Zimit
+echo "Starting crawl..."
+docker run --rm \
+  -v "${ZIM_DIR}:/output" \
+  "$ZIMIT_IMAGE" \
+  zimit "${ZIMIT_ARGS[@]}"
+
+echo ""
+echo "Crawl complete."
+
+# Verify output
+if ! ls "${ZIM_DIR}/${NAME}"_*.zim 1>/dev/null 2>&1; then
+  die "ZIM file not found after crawl — something went wrong."
+fi
+
+echo "ZIM written: $(ls -lh ${ZIM_DIR}/${NAME}_*.zim | tail -1)"
+
+# Run kibuild
+if [[ "$DO_KIBUILD" == true ]]; then
+  echo ""
+  echo "Reloading Kiwix library..."
+
+  docker run --rm \
+    -v "${ZIM_DIR}:/data" \
+    --entrypoint sh \
+    "$KIWIX_TOOLS_IMAGE" \
+    -c 'rm -f /data/kiwix-library.xml && kiwix-manage /data/kiwix-library.xml add /data/*.zim'
+
+  # Patch icons if available
+  if [[ -f "$ICON_PATCH" ]]; then
+    sudo chown "$(whoami)" "${ZIM_DIR}/kiwix-library.xml" 2>/dev/null || true
+    python3 "$ICON_PATCH" "$ZIM_DIR"
+  fi
+
+  docker restart "$KIWIX_CONTAINER"
+  echo "Kiwix reloaded."
+fi
+
+echo ""
+echo "Done."
