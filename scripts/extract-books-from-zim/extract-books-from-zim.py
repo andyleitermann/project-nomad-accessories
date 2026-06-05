@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-zim-to-calibre.py
-Extract book files from a ZIM archive and import them into a Calibre library.
+extract-books-from-zim.py
+Extract book files from a ZIM archive, optionally importing them into a Calibre library.
 
 Usage:
-  python3 zim-to-calibre.py <zim-file> --library-path /path/to/calibre [options]
+  python3 extract-books-from-zim.py <zim-file> --output-dir /path/to/books [options]
+  python3 extract-books-from-zim.py <zim-file> --library-path /path/to/calibre [options]
 """
 
 import argparse
@@ -53,20 +54,25 @@ def main():
         description='Extract books from a ZIM file and import into Calibre'
     )
     parser.add_argument('zim_file', help='Path to the ZIM file')
-    parser.add_argument('--library-path', required=True, help='Path to Calibre library')
+    parser.add_argument('--library-path', help='Path to Calibre library (import after extraction)')
+    parser.add_argument('--output-dir', help='Extract files here without importing into Calibre')
     parser.add_argument(
         '--formats',
         default=','.join(DEFAULT_FORMATS),
         help=f'Comma-separated formats to extract (default: {",".join(DEFAULT_FORMATS)})'
     )
-    parser.add_argument('--staging-dir', help='Directory for extracted files (default: temp dir)')
-    parser.add_argument('--keep-staging', action='store_true', help='Keep extracted files after import')
+    parser.add_argument('--staging-dir', help='Temp directory for extracted files before Calibre import (default: temp dir)')
+    parser.add_argument('--keep-staging', action='store_true', help='Keep extracted files after Calibre import')
     parser.add_argument('--dry-run', action='store_true', help='List what would be extracted without extracting')
     args = parser.parse_args()
 
     zim_file = str(Path(args.zim_file).resolve())
     if not os.path.isfile(zim_file):
         print(f"Error: ZIM file not found: {zim_file}", file=sys.stderr)
+        sys.exit(1)
+
+    if not args.library_path and not args.output_dir:
+        print("Error: provide --library-path (import into Calibre) or --output-dir (extract only)", file=sys.stderr)
         sys.exit(1)
 
     formats = {f.strip().lower() for f in args.formats.split(',')}
@@ -88,13 +94,17 @@ def main():
             print(f"  ... and {len(entries) - 20} more")
         return
 
-    # Set up staging dir
+    # Set up output/staging dir
+    extract_only = bool(args.output_dir)
     temp_dir = None
-    if args.staging_dir:
+    if args.output_dir:
+        staging_dir = Path(args.output_dir)
+        staging_dir.mkdir(parents=True, exist_ok=True)
+    elif args.staging_dir:
         staging_dir = Path(args.staging_dir)
         staging_dir.mkdir(parents=True, exist_ok=True)
     else:
-        temp_dir = tempfile.mkdtemp(prefix='zim-to-calibre-')
+        temp_dir = tempfile.mkdtemp(prefix='zim-extract-')
         staging_dir = Path(temp_dir)
 
     print(f"Extracting to: {staging_dir}")
@@ -127,6 +137,10 @@ def main():
             print("Nothing to import.")
             return
 
+        if extract_only:
+            print(f"\nExtraction complete. Files are in: {staging_dir}")
+            return
+
         print(f"\nImporting into Calibre library: {args.library_path}")
         result = subprocess.run(
             ['calibredb', 'add', '-r', str(staging_dir), '--library-path', args.library_path]
@@ -135,7 +149,9 @@ def main():
             print("calibredb exited with errors — check output above.", file=sys.stderr)
 
     finally:
-        if not args.keep_staging:
+        if extract_only:
+            pass  # always keep --output-dir files
+        elif not args.keep_staging:
             if temp_dir:
                 shutil.rmtree(temp_dir, ignore_errors=True)
             elif args.staging_dir:
